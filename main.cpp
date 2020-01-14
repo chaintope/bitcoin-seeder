@@ -33,6 +33,7 @@ public:
     const char *ipv4_proxy;
     const char *ipv6_proxy;
     std::set<uint64_t> filter_whitelist;
+    std::vector<std::string> vSeeds;
 
     CDnsSeedOpts() : nThreads(96), nDnsThreads(4), nPort(53), mbox(NULL), ns(NULL), host(NULL), tor(NULL), fWipeBan(false), fWipeIgnore(false), ipv4_proxy(NULL), ipv6_proxy(NULL), networkid(1) {}
 
@@ -42,6 +43,7 @@ public:
                                   "\n"
                                   "Options:\n"
                                   "-i <networkid>  Tapyrus network id to crawl(default 1)\n"
+                                  "-s <seeds>      Other Tapyrus nodes to use for seeding\n"
                                   "-h <host>       Hostname of the DNS seed\n"
                                   "-n <ns>         Hostname of the nameserver\n"
                                   "-m <mbox>       E-Mail address reported in SOA records\n"
@@ -61,6 +63,7 @@ public:
         while (1) {
             static struct option long_options[] = {
                     {"networkid",  required_argument, 0,             'i'},
+                    {"seeds",      required_argument, 0,             's'},
                     {"host",       required_argument, 0,             'h'},
                     {"ns",         required_argument, 0,             'n'},
                     {"mbox",       required_argument, 0,             'm'},
@@ -77,12 +80,17 @@ public:
                     {0, 0,                            0,             0}
             };
             int option_index = 0;
-            int c = getopt_long(argc, argv, "i:h:n:m:t:p:d:o:r:k:w:?:", long_options, &option_index);
+            int c = getopt_long(argc, argv, "i:s:h:n:m:t:p:d:o:r:k:w:?:", long_options, &option_index);
             if (c == -1) break;
             switch (c) {
                 case 'i': {
                     int n = strtol(optarg, NULL, 10);
                     networkid = n;
+                    break;
+                }
+
+                case 's': {
+                    vSeeds.push_back(optarg);
                     break;
                 }
 
@@ -425,20 +433,21 @@ extern "C" void *ThreadStats(void *) {
     return nullptr;
 }
 
-static const string mainnet_seeds[] = {
-        "seed.tapyrus.dev.chaintope.com",
-        "static-seed.tapyrus.dev.chaintope.com",
-        ""};
-
-static const string *seeds = mainnet_seeds;
-
-extern "C" void *ThreadSeeder(void *) {
+extern "C" void *ThreadSeeder(void *seeds) {
+    const std::vector<std::string> *vSeeds = ( std::vector<std::string> *)seeds;
+    vector<CNetAddr> ips;
     do {
-        for (int i = 0; seeds[i] != ""; i++) {
-            vector<CNetAddr> ips;
-            LookupHost(seeds[i].c_str(), ips);
-            for (vector<CNetAddr>::iterator it = ips.begin(); it != ips.end(); it++) {
-                db.Add(CService(*it, GetDefaultPort()), true);
+        for (auto& seed : *vSeeds) {
+            ips.clear();
+            auto pos = seed.find(':');
+            if(pos != std::string::npos)
+                db.Add(CService(seed), true);
+            else
+            {
+                LookupHost(seed.c_str(), ips);
+                for (vector<CNetAddr>::iterator it = ips.begin(); it != ips.end(); it++) {
+                    db.Add(CService(*it, TAPYRUS_DEFAULT_PORT), true);
+                }
             }
         }
         Sleep(3 * 60 * 1000);
@@ -451,6 +460,25 @@ int main(int argc, char **argv) {
     setbuf(stdout, NULL);
     CDnsSeedOpts opts;
     opts.ParseCommandLine(argc, argv);
+    bool fDNS = true;
+
+    if (!opts.vSeeds.size()) {
+        printf("Dns seeder not set. Please use -s\n");
+        exit(1);
+    }
+    if (!opts.ns) {
+        printf("No nameserver set. Not starting DNS server.\n");
+        fDNS = false;
+    }
+    if (fDNS && !opts.host) {
+        fprintf(stderr, "No hostname set. Please use -h.\n");
+        exit(1);
+    }
+    if (fDNS && !opts.mbox) {
+        fprintf(stderr, "No e-mail address set. Please use -m.\n");
+        exit(1);
+    }
+
     printf("Supporting whitelisted filters: ");
     for (std::set<uint64_t>::const_iterator it = opts.filter_whitelist.begin();
          it != opts.filter_whitelist.end(); it++) {
@@ -481,20 +509,7 @@ int main(int argc, char **argv) {
             SetProxy(NET_IPV6, service);
         }
     }
-    bool fDNS = true;
 
-    if (!opts.ns) {
-        printf("No nameserver set. Not starting DNS server.\n");
-        fDNS = false;
-    }
-    if (fDNS && !opts.host) {
-        fprintf(stderr, "No hostname set. Please use -h.\n");
-        exit(1);
-    }
-    if (fDNS && !opts.mbox) {
-        fprintf(stderr, "No e-mail address set. Please use -m.\n");
-        exit(1);
-    }
     FILE *f = fopen("dnsseed.dat", "r");
     if (f) {
         printf("Loading dnsseed.dat...");
@@ -522,7 +537,7 @@ int main(int argc, char **argv) {
         printf("done\n");
     }
     printf("Starting seeder...");
-    pthread_create(&threadSeed, NULL, ThreadSeeder, NULL);
+    pthread_create(&threadSeed, NULL, ThreadSeeder, &opts.vSeeds);
     printf("done\n");
     printf("Starting %i crawler threads...", opts.nThreads);
     pthread_attr_t attr_crawler;

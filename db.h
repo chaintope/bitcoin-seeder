@@ -101,15 +101,13 @@ public:
   }
   
   bool IsGood() const {
-//      printf("port=%d, default port=%d\n", ip.GetPort(), GetDefaultPort());
-    if (ip.GetPort() != GetDefaultPort()) return false;
-//      printf("service=%d\n", !(services & NODE_NETWORK));
+      printf("service=%d\n", !(services & NODE_NETWORK));
     if (!(services & NODE_NETWORK)) return false;
     if (!ip.IsRoutable()) return false;
     if (clientVersion && clientVersion < REQUIRE_VERSION) return false;
     if (blocks && blocks < GetRequireHeight()) return false;
 
-//    printf("node check all pass: total=%d, success=%d\n", total, success);
+    printf("node check all pass: total=%d, success=%d\n", total, success);
     if (total <= 3 && success * 2 >= total) return true;
 
     if (stat2H.reliability > 0.85 && stat2H.count > 2) return true;

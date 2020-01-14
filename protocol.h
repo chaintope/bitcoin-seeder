@@ -15,10 +15,7 @@
 #include <string>
 #include "uint256.h"
 
-static inline unsigned short GetDefaultPort()
-{
-    return 2357;
-}
+static const int TAPYRUS_DEFAULT_PORT = 2357;
 
 //
 // Message header
