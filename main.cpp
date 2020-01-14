@@ -10,8 +10,9 @@
 #include <getopt.h>
 #include <atomic>
 
-#include "bitcoin.h"
+#include "tapyrus.h"
 #include "db.h"
+#include "dns.h"
 
 using namespace std;
 
@@ -22,10 +23,9 @@ public:
     int nThreads;
     int nPort;
     int nDnsThreads;
-    int fUseTestNet;
-    int fUseParadium;
     int fWipeBan;
     int fWipeIgnore;
+    int networkid;
     const char *mbox;
     const char *ns;
     const char *host;
@@ -34,14 +34,14 @@ public:
     const char *ipv6_proxy;
     std::set<uint64_t> filter_whitelist;
 
-    CDnsSeedOpts() : nThreads(96), nDnsThreads(4), nPort(53), mbox(NULL), ns(NULL), host(NULL), tor(NULL),
-                     fUseTestNet(false), fWipeBan(false), fWipeIgnore(false), ipv4_proxy(NULL), ipv6_proxy(NULL) {}
+    CDnsSeedOpts() : nThreads(96), nDnsThreads(4), nPort(53), mbox(NULL), ns(NULL), host(NULL), tor(NULL), fWipeBan(false), fWipeIgnore(false), ipv4_proxy(NULL), ipv6_proxy(NULL), networkid(1) {}
 
     void ParseCommandLine(int argc, char **argv) {
-        static const char *help = "Bitcoin-seeder\n"
+        static const char *help = "Tapyrus-seeder\n"
                                   "Usage: %s -h <host> -n <ns> [-m <mbox>] [-t <threads>] [-p <port>]\n"
                                   "\n"
                                   "Options:\n"
+                                  "-i <networkid>  Tapyrus network id to crawl(default 1)\n"
                                   "-h <host>       Hostname of the DNS seed\n"
                                   "-n <ns>         Hostname of the nameserver\n"
                                   "-m <mbox>       E-Mail address reported in SOA records\n"
@@ -49,11 +49,9 @@ public:
                                   "-d <threads>    Number of DNS server threads (default 4)\n"
                                   "-p <port>       UDP port to listen on (default 53)\n"
                                   "-o <ip:port>    Tor proxy IP/Port\n"
-                                  "-i <ip:port>    IPV4 SOCKS5 proxy IP/Port\n"
+                                  "-r <ip:port>    IPV4 SOCKS5 proxy IP/Port\n"
                                   "-k <ip:port>    IPV6 SOCKS5 proxy IP/Port\n"
                                   "-w f1,f2,...    Allow these flag combinations as filters\n"
-                                  "--testnet       Use testnet\n"
-                                  "--paradium      Use paradium network\n"
                                   "--wipeban       Wipe list of banned nodes\n"
                                   "--wipeignore    Wipe list of ignored nodes\n"
                                   "-?, --help      Show this text\n"
@@ -62,6 +60,7 @@ public:
 
         while (1) {
             static struct option long_options[] = {
+                    {"networkid",  required_argument, 0,             'i'},
                     {"host",       required_argument, 0,             'h'},
                     {"ns",         required_argument, 0,             'n'},
                     {"mbox",       required_argument, 0,             'm'},
@@ -69,20 +68,24 @@ public:
                     {"dnsthreads", required_argument, 0,             'd'},
                     {"port",       required_argument, 0,             'p'},
                     {"onion",      required_argument, 0,             'o'},
-                    {"proxyipv4",  required_argument, 0,             'i'},
+                    {"proxyipv4",  required_argument, 0,             'r'},
                     {"proxyipv6",  required_argument, 0,             'k'},
-                    {"filter",     required_argument, 0,             'w'},
-                    {"testnet",    no_argument,       &fUseTestNet,  1},
-                    {"paradium",   no_argument,       &fUseParadium, 1},
+                    {"filter",      required_argument, 0,             'w'},
                     {"wipeban",    no_argument,       &fWipeBan,     1},
                     {"wipeignore", no_argument,       &fWipeBan,     1},
-                    {"help",       no_argument,       0,             'h'},
+                    {"help",       no_argument,       0,             '?'},
                     {0, 0,                            0,             0}
             };
             int option_index = 0;
-            int c = getopt_long(argc, argv, "h:n:m:t:p:d:o:i:k:w:", long_options, &option_index);
+            int c = getopt_long(argc, argv, "i:h:n:m:t:p:d:o:r:k:w:?:", long_options, &option_index);
             if (c == -1) break;
             switch (c) {
+                case 'i': {
+                    int n = strtol(optarg, NULL, 10);
+                    networkid = n;
+                    break;
+                }
+
                 case 'h': {
                     host = optarg;
                     break;
@@ -121,7 +124,7 @@ public:
                     break;
                 }
 
-                case 'i': {
+                case 'r': {
                     ipv4_proxy = optarg;
                     break;
                 }
@@ -158,18 +161,27 @@ public:
             filter_whitelist.insert(13);
         }
         if (host != NULL && ns == NULL) showHelp = true;
-        if (showHelp) fprintf(stderr, help, argv[0]);
+        if (showHelp)
+        {
+            fprintf(stderr, help, argv[0]);
+            exit(0);
+        }
     }
 };
 
-extern "C" {
-#include "dns.h"
-}
 
 CAddrDb db;
 
+struct ThreadCrawler_options
+{
+    int nThreads;
+    int nNetworkId;
+};
+
 extern "C" void *ThreadCrawler(void *data) {
-    int *nThreads = (int *) data;
+    ThreadCrawler_options *threadOpts = (ThreadCrawler_options*)data;
+    int nThreads = threadOpts->nThreads;
+    int nNetworkId = threadOpts->nNetworkId;
     do {
         std::vector<CServiceResult> ips;
         int wait = 5;
@@ -177,7 +189,7 @@ extern "C" void *ThreadCrawler(void *data) {
         int64 now = time(NULL);
         if (ips.empty()) {
             wait *= 1000;
-            wait += rand() % (500 * *nThreads);
+            wait += rand() % (500 * nThreads);
             Sleep(wait);
             continue;
         }
@@ -190,7 +202,7 @@ extern "C" void *ThreadCrawler(void *data) {
             res.strClientV = "";
             bool getaddr = res.ourLastSuccess < now;
             res.fGood = TestNode(res.service, res.nBanTime, res.nClientV, res.strClientV, res.nHeight,
-                                 getaddr ? &addr : NULL);
+                                 getaddr ? &addr : NULL, nNetworkId);
         }
         db.ResultMany(ips);
         db.Add(addr);
@@ -417,14 +429,7 @@ static const string mainnet_seeds[] = {
         "seed.tapyrus.dev.chaintope.com",
         "static-seed.tapyrus.dev.chaintope.com",
         ""};
-static const string testnet_seeds[] = {
-        "seed.tapyrus.dev.chaintope.com",
-        "static-seed.tapyrus.dev.chaintope.com",
-        ""};
-static const string paradium_seeds[] = {
-        "seed.paradium.dev.chaintope.com",
-        "static-seed.paradium.dev.chaintope.com",
-        ""};
+
 static const string *seeds = mainnet_seeds;
 
 extern "C" void *ThreadSeeder(void *) {
@@ -477,29 +482,7 @@ int main(int argc, char **argv) {
         }
     }
     bool fDNS = true;
-    if (opts.fUseTestNet) {
-        printf("Using testnet.\n");
-        // 0x75 0x9A 0x83 0x74
-        pchMessageStart[0] = 0x75;
-        pchMessageStart[1] = 0x9a;
-        pchMessageStart[2] = 0x83;
-        pchMessageStart[3] = 0x74;
-        seeds = testnet_seeds;
-        fTestNet = true;
-    } else if (opts.fUseParadium) {
-        printf("Using paradium.\n");
-        /**
-         * Paradium networkId is 101.
-         * networkId=1 magic bytes is: 01 FF F0 00.
-         * thus, paradium magic byes is: 01 FF F0 64.
-         */
-        pchMessageStart[0] = 0x01;
-        pchMessageStart[1] = 0xff;
-        pchMessageStart[2] = 0xf0;
-        pchMessageStart[3] = 0x64;
-        seeds = paradium_seeds;
-        fTestNet = false;
-    }
+
     if (!opts.ns) {
         printf("No nameserver set. Not starting DNS server.\n");
         fDNS = false;
@@ -524,6 +507,8 @@ int main(int argc, char **argv) {
         printf("done\n");
     }
 
+    printf("Dnsseed networkid is %i\n", opts.networkid);
+
     pthread_t threadDns, threadSeed, threadDump, threadStats;
     if (fDNS) {
         printf("Starting %i DNS threads for %s on %s (port %i)...", opts.nDnsThreads, opts.host, opts.ns, opts.nPort);
@@ -545,7 +530,10 @@ int main(int argc, char **argv) {
     pthread_attr_setstacksize(&attr_crawler, 0x20000);
     for (int i = 0; i < opts.nThreads; i++) {
         pthread_t thread;
-        pthread_create(&thread, &attr_crawler, ThreadCrawler, &opts.nThreads);
+        ThreadCrawler_options threadOpts;
+        threadOpts.nThreads = opts.nThreads;
+        threadOpts.nNetworkId = opts.networkid;
+        pthread_create(&thread, &attr_crawler, ThreadCrawler, &threadOpts);
     }
     pthread_attr_destroy(&attr_crawler);
     printf("done\n");

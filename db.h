@@ -12,9 +12,9 @@
 
 #define MIN_RETRY 60
 
-#define REQUIRE_VERSION 70001
+#define REQUIRE_VERSION 10000
 
-static inline int GetRequireHeight(const bool testnet = fTestNet)
+static inline int GetRequireHeight()
 {
     return 1;
 }
@@ -122,7 +122,6 @@ public:
   }
   int GetBanTime() const {
     if (IsGood()) return 0;
-    if (clientVersion && clientVersion < 31900) { return 604800; }
     if (stat1M.reliability - stat1M.weight + 1.0 < 0.15 && stat1M.count > 32) { return 30*86400; }
     if (stat1W.reliability - stat1W.weight + 1.0 < 0.10 && stat1W.count > 16) { return 7*86400; }
     if (stat1D.reliability - stat1D.weight + 1.0 < 0.05 && stat1D.count > 8) { return 1*86400; }
@@ -234,7 +233,7 @@ public:
       stats.nTracked = ourId.size();
       stats.nGood = goodId.size();
       stats.nNew = unkId.size();
-      stats.nAge = time(NULL) - idToInfo[ourId[0]].ourLastTry;
+      stats.nAge = ourId.size() ? time(NULL) - idToInfo[ourId[0]].ourLastTry : 0;
     }
   }
 

@@ -15,10 +15,9 @@
 #include <string>
 #include "uint256.h"
 
-extern bool fTestNet;
-static inline unsigned short GetDefaultPort(const bool testnet = fTestNet)
+static inline unsigned short GetDefaultPort()
 {
-    return testnet ? 12357 : 2357;
+    return 2357;
 }
 
 //
@@ -28,30 +27,27 @@ static inline unsigned short GetDefaultPort(const bool testnet = fTestNet)
 //  (4) size
 //  (4) checksum
 
-extern unsigned char pchMessageStart[4];
-
 class CMessageHeader
 {
     public:
-        CMessageHeader();
-        CMessageHeader(const char* pszCommand, unsigned int nMessageSizeIn);
+        CMessageHeader(const char* messageStart);
+        CMessageHeader(const char* pszCommand, const char* messageStart, unsigned int nMessageSizeIn);
 
         std::string GetCommand() const;
-        bool IsValid() const;
+        bool IsValid(const char* messageStart) const;
 
         IMPLEMENT_SERIALIZE
             (
              READWRITE(FLATDATA(pchMessageStart));
              READWRITE(FLATDATA(pchCommand));
              READWRITE(nMessageSize);
-             if (nVersion >= 209)
              READWRITE(nChecksum);
             )
 
     // TODO: make private (improves encapsulation)
     public:
         enum { COMMAND_SIZE=12 };
-        char pchMessageStart[sizeof(::pchMessageStart)];
+        char pchMessageStart[4];
         char pchCommand[COMMAND_SIZE];
         unsigned int nMessageSize;
         unsigned int nChecksum;
@@ -77,9 +73,9 @@ class CAddress : public CService
              if (fRead)
                  pthis->Init();
              if (nType & SER_DISK)
-             READWRITE(nVersion);
-             if ((nType & SER_DISK) || (nVersion >= 31402 && !(nType & SER_GETHASH)))
-             READWRITE(nTime);
+                READWRITE(nVersion);
+             if ((nType & SER_DISK) || (nType & SER_NETWORK) && nVersion > INIT_PROTO_VERSION)
+                READWRITE(nTime);
              READWRITE(nServices);
              READWRITE(*pip);
             )
