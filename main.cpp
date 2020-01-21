@@ -359,8 +359,11 @@ int StatCompare(const CAddrReport &a, const CAddrReport &b) {
     }
 }
 
-extern "C" void *ThreadDumper(void *) {
+extern "C" void *ThreadDumper(void *arg) {
+    int *pnetworkid = (int *)arg;
     int count = 0;
+    char filename[25] = {};
+    sprintf(filename, "dnsseed.dat.%d", *pnetworkid);
     do {
         Sleep(100000 << count); // First 100s, than 200s, 400s, 800s, 1600s, and then 3200s forever
         if (count < 5)
@@ -374,9 +377,10 @@ extern "C" void *ThreadDumper(void *) {
                     CAutoFile cf(f);
                     cf << db;
                 }
-                rename("dnsseed.dat.new", "dnsseed.dat");
+                rename("dnsseed.dat.new", filename);
             }
-            FILE *d = fopen("dnsseed.dump", "w");
+            sprintf(filename, "dnsseed.dump.%d", *pnetworkid);
+            FILE *d = fopen(filename, "w");
             fprintf(d,
                     "# address                                        good  lastSuccess    %%(2h)   %%(8h)   %%(1d)   %%(7d)  %%(30d)  blocks      svcs  version\n");
             double stat[5] = {0, 0, 0, 0, 0};
@@ -509,10 +513,13 @@ int main(int argc, char **argv) {
             SetProxy(NET_IPV6, service);
         }
     }
+     printf("Dnsseed networkid is %i\n", opts.networkid);
 
-    FILE *f = fopen("dnsseed.dat", "r");
+    char filename[25] = {};
+    sprintf(filename, "dnsseed.dat.%d", opts.networkid);
+    FILE *f = fopen(filename, "r");
     if (f) {
-        printf("Loading dnsseed.dat...");
+        printf("Loading %s...", filename);
         CAutoFile cf(f);
         cf >> db;
         if (opts.fWipeBan)
@@ -522,7 +529,6 @@ int main(int argc, char **argv) {
         printf("done\n");
     }
 
-    printf("Dnsseed networkid is %i\n", opts.networkid);
 
     pthread_t threadDns, threadSeed, threadDump, threadStats;
     if (fDNS) {
@@ -553,7 +559,7 @@ int main(int argc, char **argv) {
     pthread_attr_destroy(&attr_crawler);
     printf("done\n");
     pthread_create(&threadStats, NULL, ThreadStats, NULL);
-    pthread_create(&threadDump, NULL, ThreadDumper, NULL);
+    pthread_create(&threadDump, NULL, ThreadDumper, &opts.networkid);
     void *res;
     pthread_join(threadDump, &res);
     return 0;

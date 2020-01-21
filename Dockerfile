@@ -31,4 +31,4 @@ VOLUME ${APP_DIRECTORY}
 
 EXPOSE 53
 
-ENTRYPOINT ["dnsseed", "--testnet", "-m", "nakajo@chaintope.com"]
+ENTRYPOINT ["dnsseed", "-i", "1939510133", "-m", "nakajo@chaintope.com"]

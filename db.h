@@ -202,6 +202,7 @@ struct CServiceResult {
 class CAddrDb {
 private:
   mutable CCriticalSection cs;
+  int networkid;
   int nId; // number of address id's
   std::map<int, CAddrInfo> idToInfo; // map address id to address info (b,c,d,e)
   std::map<CService, int> ipToId; // map ip to id (b,c,d,e)
@@ -231,7 +232,8 @@ public:
       stats.nTracked = ourId.size();
       stats.nGood = goodId.size();
       stats.nNew = unkId.size();
-      stats.nAge = ourId.size() ? time(NULL) - idToInfo[ourId[0]].ourLastTry : 0;
+      if(ourId.size())
+        stats.nAge = time(NULL) - idToInfo[ourId[0]].ourLastTry;
     }
   }
 
@@ -257,6 +259,7 @@ public:
   // serialization code
   // format:
   //   nVersion (0 for now)
+  //   networkid
   //   n (number of ips in (b,c,d))
   //   CAddrInfo[n]
   //   banned
@@ -265,6 +268,7 @@ public:
   IMPLEMENT_SERIALIZE (({
     int nVersion = 0;
     READWRITE(nVersion);
+    READWRITE(networkid);
     SHARED_CRITICAL_BLOCK(cs) {
       if (fWrite) {
         CAddrDb *db = const_cast<CAddrDb*>(this);
