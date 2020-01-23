@@ -101,13 +101,13 @@ public:
   }
   
   bool IsGood() const {
-      printf("service=%d\n", !(services & NODE_NETWORK));
+  //printf("service=%d\n", !(services & NODE_NETWORK));
     if (!(services & NODE_NETWORK)) return false;
     if (!ip.IsRoutable()) return false;
     if (clientVersion && clientVersion < REQUIRE_VERSION) return false;
     if (blocks && blocks < GetRequireHeight()) return false;
 
-    printf("node check all pass: total=%d, success=%d\n", total, success);
+    //printf("node check all pass: total=%d, success=%d\n", total, success);
     if (total <= 3 && success * 2 >= total) return true;
 
     if (stat2H.reliability > 0.85 && stat2H.count > 2) return true;
@@ -139,7 +139,7 @@ public:
   friend class CAddrDb;
   
   IMPLEMENT_SERIALIZE (
-    unsigned char version = 4;
+    unsigned char version = 0;
     READWRITE(version);
     READWRITE(ip);
     READWRITE(services);
@@ -153,20 +153,13 @@ public:
       READWRITE(stat8H);
       READWRITE(stat1D);
       READWRITE(stat1W);
-      if (version >= 1)
-          READWRITE(stat1M);
-      else
-          if (!fWrite)
-              *((CAddrStat*)(&stat1M)) = stat1W;
+      READWRITE(stat1M);
       READWRITE(total);
       READWRITE(success);
       READWRITE(clientVersion);
-      if (version >= 2)
-          READWRITE(clientSubVersion);
-      if (version >= 3)
-          READWRITE(blocks);
-      if (version >= 4)
-          READWRITE(ourLastSuccess);
+      READWRITE(clientSubVersion);
+      READWRITE(blocks);
+      READWRITE(ourLastSuccess);
     }
   )
 };
