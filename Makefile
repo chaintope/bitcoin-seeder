@@ -1,6 +1,11 @@
-CXXFLAGS = -march=native -I/usr/local/opt/openssl/include
-LDFLAGS = $(CXXFLAGS) -L/usr/local/opt/openssl/lib
+# export OPENSSL_PREFIX=/usr/local/opt/openssl
+# make
+#   or
+# make OPENSSL_PREFIX=/usr/local/opt/openssl
+CXXFLAGS = -march=native -I${OPENSSL_PREFIX}/include
+LDFLAGS = $(CXXFLAGS) -L${OPENSSL_PREFIX}/lib
 
+# make DEBUG=y OPENSSL_PREFIX=/usr/local/opt/openssl
 ifeq (${DEBUG}, y)
   CXXFLAGS += -O0 -g3 -DDEBUG
 else
