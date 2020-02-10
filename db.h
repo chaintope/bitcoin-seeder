@@ -12,9 +12,9 @@
 
 #define MIN_RETRY 60
 
-#define REQUIRE_VERSION 70001
+#define REQUIRE_VERSION 10000
 
-static inline int GetRequireHeight(const bool testnet = fTestNet)
+static inline int GetRequireHeight()
 {
     return 1;
 }
@@ -101,15 +101,13 @@ public:
   }
   
   bool IsGood() const {
-//      printf("port=%d, default port=%d\n", ip.GetPort(), GetDefaultPort());
-    if (ip.GetPort() != GetDefaultPort()) return false;
-//      printf("service=%d\n", !(services & NODE_NETWORK));
+  //printf("service=%d\n", !(services & NODE_NETWORK));
     if (!(services & NODE_NETWORK)) return false;
     if (!ip.IsRoutable()) return false;
     if (clientVersion && clientVersion < REQUIRE_VERSION) return false;
     if (blocks && blocks < GetRequireHeight()) return false;
 
-//    printf("node check all pass: total=%d, success=%d\n", total, success);
+    //printf("node check all pass: total=%d, success=%d\n", total, success);
     if (total <= 3 && success * 2 >= total) return true;
 
     if (stat2H.reliability > 0.85 && stat2H.count > 2) return true;
@@ -122,7 +120,6 @@ public:
   }
   int GetBanTime() const {
     if (IsGood()) return 0;
-    if (clientVersion && clientVersion < 31900) { return 604800; }
     if (stat1M.reliability - stat1M.weight + 1.0 < 0.15 && stat1M.count > 32) { return 30*86400; }
     if (stat1W.reliability - stat1W.weight + 1.0 < 0.10 && stat1W.count > 16) { return 7*86400; }
     if (stat1D.reliability - stat1D.weight + 1.0 < 0.05 && stat1D.count > 8) { return 1*86400; }
@@ -142,7 +139,7 @@ public:
   friend class CAddrDb;
   
   IMPLEMENT_SERIALIZE (
-    unsigned char version = 4;
+    unsigned char version = 0;
     READWRITE(version);
     READWRITE(ip);
     READWRITE(services);
@@ -156,20 +153,13 @@ public:
       READWRITE(stat8H);
       READWRITE(stat1D);
       READWRITE(stat1W);
-      if (version >= 1)
-          READWRITE(stat1M);
-      else
-          if (!fWrite)
-              *((CAddrStat*)(&stat1M)) = stat1W;
+      READWRITE(stat1M);
       READWRITE(total);
       READWRITE(success);
       READWRITE(clientVersion);
-      if (version >= 2)
-          READWRITE(clientSubVersion);
-      if (version >= 3)
-          READWRITE(blocks);
-      if (version >= 4)
-          READWRITE(ourLastSuccess);
+      READWRITE(clientSubVersion);
+      READWRITE(blocks);
+      READWRITE(ourLastSuccess);
     }
   )
 };
@@ -205,6 +195,7 @@ struct CServiceResult {
 class CAddrDb {
 private:
   mutable CCriticalSection cs;
+  int networkid;
   int nId; // number of address id's
   std::map<int, CAddrInfo> idToInfo; // map address id to address info (b,c,d,e)
   std::map<CService, int> ipToId; // map ip to id (b,c,d,e)
@@ -234,7 +225,8 @@ public:
       stats.nTracked = ourId.size();
       stats.nGood = goodId.size();
       stats.nNew = unkId.size();
-      stats.nAge = time(NULL) - idToInfo[ourId[0]].ourLastTry;
+      if(ourId.size())
+        stats.nAge = time(NULL) - idToInfo[ourId[0]].ourLastTry;
     }
   }
 
@@ -260,6 +252,7 @@ public:
   // serialization code
   // format:
   //   nVersion (0 for now)
+  //   networkid
   //   n (number of ips in (b,c,d))
   //   CAddrInfo[n]
   //   banned
@@ -268,6 +261,7 @@ public:
   IMPLEMENT_SERIALIZE (({
     int nVersion = 0;
     READWRITE(nVersion);
+    READWRITE(networkid);
     SHARED_CRITICAL_BLOCK(cs) {
       if (fWrite) {
         CAddrDb *db = const_cast<CAddrDb*>(this);

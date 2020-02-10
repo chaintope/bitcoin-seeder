@@ -60,7 +60,10 @@ class CDataStream;
 class CAutoFile;
 static const unsigned int MAX_SIZE = 0x02000000;
 
-static const int PROTOCOL_VERSION = 60000;
+static const int PROTOCOL_VERSION = 10000;
+
+//! initial proto version, to be increased after version/verack negotiation
+static const int INIT_PROTO_VERSION = 1227;
 
 // Used to bypass the rule against non-const reference to temporary
 // where it makes sense with wrappers such as CFlatData or CTxDB

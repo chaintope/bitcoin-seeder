@@ -6,7 +6,7 @@
 #include "serialize.h"
 #include "uint256.h"
 
-#define BITCOIN_SEED_NONCE  0x0539a019ca550825ULL
+#define SEED_NONCE  0x0539a019ca550825ULL
 
 using namespace std;
 
@@ -23,6 +23,8 @@ class CNode {
   int ban;
   int64 doneAfter;
   CAddress you;
+  int networkid;
+  char pchMessageStart[4];
 
   int GetTimeout() {
       if (you.IsTor())
@@ -34,7 +36,7 @@ class CNode {
   void BeginMessage(const char *pszCommand) {
     if (nHeaderStart != -1) AbortMessage();
     nHeaderStart = vSend.size();
-    vSend << CMessageHeader(pszCommand, 0);
+    vSend << CMessageHeader(pszCommand, pchMessageStart, 0);
     nMessageStart = vSend.size();
 //    printf("%s: SEND %s\n", ToString(you).c_str(), pszCommand); 
   }
@@ -50,13 +52,13 @@ class CNode {
     if (nHeaderStart == -1) return;
     unsigned int nSize = vSend.size() - nMessageStart;
     memcpy((char*)&vSend[nHeaderStart] + offsetof(CMessageHeader, nMessageSize), &nSize, sizeof(nSize));
-    if (vSend.GetVersion() >= 209) {
-      uint256 hash = Hash(vSend.begin() + nMessageStart, vSend.end());
-      unsigned int nChecksum = 0;
-      memcpy(&nChecksum, &hash, sizeof(nChecksum));
-      assert(nMessageStart - nHeaderStart >= offsetof(CMessageHeader, nChecksum) + sizeof(nChecksum));
-      memcpy((char*)&vSend[nHeaderStart] + offsetof(CMessageHeader, nChecksum), &nChecksum, sizeof(nChecksum));
-    }
+
+    uint256 hash = Hash(vSend.begin() + nMessageStart, vSend.end());
+    unsigned int nChecksum = 0;
+    memcpy(&nChecksum, &hash, sizeof(nChecksum));
+    assert(nMessageStart - nHeaderStart >= offsetof(CMessageHeader, nChecksum) + sizeof(nChecksum));
+    memcpy((char*)&vSend[nHeaderStart] + offsetof(CMessageHeader, nChecksum), &nChecksum, sizeof(nChecksum));
+
     nHeaderStart = -1;
     nMessageStart = -1;
   }
@@ -75,12 +77,12 @@ class CNode {
   
   void PushVersion() {
     int64 nTime = time(NULL);
-    uint64 nLocalNonce = BITCOIN_SEED_NONCE;
+    uint64 nLocalNonce = SEED_NONCE;
     int64 nLocalServices = 0;
     CAddress me(CService("0.0.0.0"));
     BeginMessage("version");
     int nBestHeight = GetRequireHeight();
-    string ver = "/bitcoin-seeder:0.01/";
+    string ver = "/tapyrus-seeder:0.01/";
     vSend << PROTOCOL_VERSION << nLocalServices << nTime << you << me << nLocalNonce << ver << nBestHeight;
     EndMessage();
   }
@@ -103,24 +105,12 @@ class CNode {
       CAddress addrMe;
       CAddress addrFrom;
       uint64 nNonce = 1;
-      vRecv >> nVersion >> you.nServices >> nTime >> addrMe;
-      if (nVersion == 10300) nVersion = 300;
-      if (nVersion >= 106 && !vRecv.empty())
-        vRecv >> addrFrom >> nNonce;
-      if (nVersion >= 106 && !vRecv.empty())
-        vRecv >> strSubVer;
-      if (nVersion >= 209 && !vRecv.empty())
-        vRecv >> nStartingHeight;
-      
-      if (nVersion >= 209) {
-        BeginMessage("verack");
-        EndMessage();
-      }
+      vRecv >> nVersion >> you.nServices >> nTime >> addrMe >> addrFrom >> nNonce >> strSubVer >> nStartingHeight;
+
+      BeginMessage("verack");
+      EndMessage();
+
       vSend.SetVersion(min(nVersion, PROTOCOL_VERSION));
-      if (nVersion < 209) {
-        this->vRecv.SetVersion(min(nVersion, PROTOCOL_VERSION));
-        GotVersion();
-      }
       return false;
     }
     
@@ -160,7 +150,7 @@ class CNode {
     if (vRecv.empty()) return false;
     do {
       CDataStream::iterator pstart = search(vRecv.begin(), vRecv.end(), BEGIN(pchMessageStart), END(pchMessageStart));
-      int nHeaderSize = vRecv.GetSerializeSize(CMessageHeader());
+      int nHeaderSize = vRecv.GetSerializeSize(CMessageHeader(pchMessageStart));
       if (vRecv.end() - pstart < nHeaderSize) {
         if (vRecv.size() > nHeaderSize) {
           vRecv.erase(vRecv.begin(), vRecv.end() - nHeaderSize);
@@ -169,9 +159,9 @@ class CNode {
       }
       vRecv.erase(vRecv.begin(), pstart);
       vector<char> vHeaderSave(vRecv.begin(), vRecv.begin() + nHeaderSize);
-      CMessageHeader hdr;
+      CMessageHeader hdr(pchMessageStart);
       vRecv >> hdr;
-      if (!hdr.IsValid()) { 
+      if (!hdr.IsValid(pchMessageStart)) { 
         // printf("%s: BAD (invalid header)\n", ToString(you).c_str());
         ban = 100000; return true;
       }
@@ -186,12 +176,12 @@ class CNode {
         vRecv.insert(vRecv.begin(), vHeaderSave.begin(), vHeaderSave.end());
         break;
       }
-      if (vRecv.GetVersion() >= 209) {
-        uint256 hash = Hash(vRecv.begin(), vRecv.begin() + nMessageSize);
-        unsigned int nChecksum = 0;
-        memcpy(&nChecksum, &hash, sizeof(nChecksum));
-        if (nChecksum != hdr.nChecksum) continue;
-      }
+
+      uint256 hash = Hash(vRecv.begin(), vRecv.begin() + nMessageSize);
+      unsigned int nChecksum = 0;
+      memcpy(&nChecksum, &hash, sizeof(nChecksum));
+      if (nChecksum != hdr.nChecksum) continue;
+
       CDataStream vMsg(vRecv.begin(), vRecv.begin() + nMessageSize, vRecv.nType, vRecv.nVersion);
       vRecv.ignore(nMessageSize);
       if (ProcessMessage(strCommand, vMsg))
@@ -202,16 +192,21 @@ class CNode {
   }
   
 public:
-  CNode(const CService& ip, vector<CAddress>* vAddrIn) : you(ip), nHeaderStart(-1), nMessageStart(-1), vAddr(vAddrIn), ban(0), doneAfter(0), nVersion(0) {
+  CNode(const CService& ip, vector<CAddress>* vAddrIn, const int inNetworkId) : you(ip), nHeaderStart(-1), nMessageStart(-1), vAddr(vAddrIn), ban(0), doneAfter(0), nVersion(0), networkid(inNetworkId) {
     vSend.SetType(SER_NETWORK);
-    vSend.SetVersion(0);
+    vSend.SetVersion(INIT_PROTO_VERSION);
     vRecv.SetType(SER_NETWORK);
     vRecv.SetVersion(0);
-    if (time(NULL) > 1329696000) {
-      vSend.SetVersion(209);
-      vRecv.SetVersion(209);
-    }
+
+    int magicBytes = 33550335 + inNetworkId;
+    CDataStream stream(SER_NETWORK, PROTOCOL_VERSION);
+    stream << magicBytes;
+    pchMessageStart[0] = stream[3];
+    pchMessageStart[1] = stream[2];
+    pchMessageStart[2] = stream[1];
+    pchMessageStart[3] = stream[0];
   }
+
   bool Run() {
     bool res = true;
     if (!ConnectSocket(you, sock)) return false;
@@ -276,9 +271,9 @@ public:
   }
 };
 
-bool TestNode(const CService &cip, int &ban, int &clientV, std::string &clientSV, int &blocks, vector<CAddress>* vAddr) {
+bool TestNode(const CService &cip, int &ban, int &clientV, std::string &clientSV, int &blocks, vector<CAddress>* vAddr, int networkid) {
   try {
-    CNode node(cip, vAddr);
+    CNode node(cip, vAddr, networkid);
     bool ret = node.Run();
     if (!ret) {
       ban = node.GetBan();
@@ -302,7 +297,7 @@ int main(void) {
   vector<CAddress> vAddr;
   vAddr.clear();
   int ban = 0;
-  bool ret = TestNode(ip, ban, vAddr);
+  bool ret = TestNode(ip, ban, vAddr, 1);
   printf("ret=%s ban=%i vAddr.size()=%i\n", ret ? "good" : "bad", ban, (int)vAddr.size());
 }
 */
