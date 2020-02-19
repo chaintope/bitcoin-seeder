@@ -17,7 +17,7 @@ RUN make
 
 FROM alpine:3.7
 
-COPY --from=seed-build /src/dnsseed /usr/local/bin/dnsseed
+COPY --from=seed-build /src/tapyrusseed /usr/local/bin/tapyrusseed
 
 RUN apk --no-cache add \
     libcrypto1.0 \
@@ -31,4 +31,4 @@ VOLUME ${APP_DIRECTORY}
 
 EXPOSE 53
 
-ENTRYPOINT ["dnsseed", "-i", "1939510133", "-m", "nakajo@chaintope.com"]
+ENTRYPOINT ["tapyrusseed", "-i", "1939510133", "-s", "1939510133:seed.tapyrus.dev.chaintope.com", "-m", "nakajo@chaintope.com"]
