@@ -33,7 +33,6 @@ public:
     int nDnsThreads;
     int fWipeBan;
     int fWipeIgnore;
-    int networkid;
     const char *mbox;
     const char *ns;
     const char *host;
@@ -44,7 +43,7 @@ public:
     std::vector<std::string> vSeeds;
     std::set<int> networks;
 
-    CDnsSeedOpts() : nThreads(96), nDnsThreads(4), nPort(53), mbox(NULL), ns(NULL), host(NULL), tor(NULL), fWipeBan(false), fWipeIgnore(false), ipv4_proxy(NULL), ipv6_proxy(NULL), networkid(1) {}
+    CDnsSeedOpts() : nThreads(96), nDnsThreads(4), nPort(53), mbox(NULL), ns(NULL), host(NULL), tor(NULL), fWipeBan(false), fWipeIgnore(false), ipv4_proxy(NULL), ipv6_proxy(NULL) {}
 
     void ParseCommandLine(int argc, char **argv) {
         static const char *help = "Tapyrus-seeder\n"
@@ -541,6 +540,14 @@ int main(int argc, char **argv) {
         fprintf(stderr, "No e-mail address set. Please use -m.\n");
         exit(1);
     }
+    if(opts.nThreads < opts.networks.size()) {
+        fprintf(stderr, "Number of crawlers (%d) is less then number of serviced networks (%lu). Please make -t at least %lu.\n", opts.nThreads, opts.networks.size(), opts.networks.size());
+        exit(1);
+    }
+    if(opts.nDnsThreads < opts.networks.size()) {
+        fprintf(stderr, "Number of dns threads (%d) is less then number of serviced networks (%lu). Please make -d at least %lu.\n", opts.nDnsThreads, opts.networks.size(), opts.networks.size());
+        exit(1);
+    }
 
     std::ostringstream  networkstr;
     for(auto networkId:opts.networks)
@@ -581,7 +588,15 @@ int main(int argc, char **argv) {
         seedTmp.clear();
         for(auto &seed:opts.vSeeds)
         {
-            if(std::stoi(seed.substr(0, seed.find(":"))) == network)
+            bool numValid = true;
+            std::string prefix(seed.substr(0, seed.find(":")));
+            for(auto c:prefix)
+                numValid &= isdigit(c);
+
+            if(!numValid)
+                continue;
+
+            if(std::stoi(prefix) == network)
                 seedTmp.push_back(seed.substr(seed.find(":")+1));
         }
         mSeeds.emplace(network, seedTmp);
@@ -597,7 +612,7 @@ int main(int argc, char **argv) {
     for(auto network:opts.networks)
         dbs[network] = new CAddrDb();
 
-    //load stats of networks for which there is no tapyrusseed.dat.
+    //load stats of networks from tapyrusseed_<id>.dat.
     for(auto network: opts.networks)
     {
         char filename[25] = {};
@@ -619,13 +634,13 @@ int main(int argc, char **argv) {
 
     //if there are networks without tapyrusseed.dat and -s exit
     if(missing.size()) {
-        printf("\nDNS information file, tapyrusseed.dat.<networkId> missing for some networks and number of initial DNS seeders do not match the number of networks served.\nPlease provide at least one -s <network_id>:<seeder_ip_address> for each of the networks configured using -i.\n");
+        printf("\nInitial DNS seeders -s is not configured for one or more network(s). DNS information file, tapyrusseed_<networkId>.dat not found for one or more of these network(s).\n Please provide at least one -s <network_id>:<seeder_ip_address> for each of the networks configured using -i.\n");
         exit(1);
     }
 
     pthread_t threadDns, threadSeed, threadDump, threadStats;
 
-    printf("Starting seeder...");
+    printf("Starting seeder thread...");
     ThreadSeeder_options threadOpts;
     threadOpts.mSeeds = &mSeeds;
     threadOpts.size = opts.networks.size();

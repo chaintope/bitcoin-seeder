@@ -11,7 +11,7 @@ Features:
 * keeps statistics over (exponential) windows of 2 hours, 8 hours,
   1 day and 1 week, to base decisions on.
 * very low memory (a few tens of megabytes) and cpu requirements.
-* crawlers can monitor multiple networks and run in parallel (by default 94 threads simultaneously).
+* crawlers can monitor multiple networks and run in parallel (by default 96 threads simultaneously).
 
 REQUIREMENTS
 ------------
@@ -47,6 +47,8 @@ Multiple initial seeders for each networks can be configured using multiple -s
 The initial seed node may be another Tapyrus seeder or a Tapyrus core node
 
 ./tapyrusseed -i <network_id> -s <network_id>:<tapyrus_seeder_name> -s <network_id>:<ip_address>:<tapyrus_core_port>
+
+When parsing of an initial seeder parameter fails it is ignored and only valid parameters are used.
 
 If you want the DNS server to report SOA records, please provide an
 e-mail address (with the @ part replaced by .) using -m.
