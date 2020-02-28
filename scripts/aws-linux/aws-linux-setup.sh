@@ -8,11 +8,11 @@ git clone https://github.com/chaintope/tapyrus-seeder
 cd tapyrus-seeder
 
 #clearn
-rm -f dnsseed *.o
+rm -f tapyrusseed *.o
 
 # build
 make
 
 # install
-sudo cp ./dnsseed /usr/bin/dnsseed
+sudo cp ./tapyrusseed /usr/bin/tapyrusseed
 

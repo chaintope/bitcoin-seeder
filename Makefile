@@ -12,8 +12,8 @@ else
   CXXFAGS += -O3 -g0
 endif
 
-dnsseed: dns.o tapyrus.o netbase.o protocol.o db.o main.o util.o
-	g++ -pthread $(LDFLAGS) -o dnsseed dns.o tapyrus.o netbase.o protocol.o db.o main.o util.o -lcrypto
+tapyrusseed: dns.o tapyrus.o netbase.o protocol.o db.o main.o util.o
+	g++ -pthread $(LDFLAGS) -o tapyrusseed dns.o tapyrus.o netbase.o protocol.o db.o main.o util.o -lcrypto
 
 %.o: %.cpp *.h
 	g++ -std=c++11 -pthread $(CXXFLAGS) -Wall -Wno-unused -Wno-sign-compare -Wno-reorder -Wno-comment -c -o $@ $<

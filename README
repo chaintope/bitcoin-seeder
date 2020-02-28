@@ -1,18 +1,17 @@
-bitcoin-seeder
+Tapyrus-seeder
 ==============
 
-Bitcoin-seeder is a crawler for the Bitcoin network, which exposes a list
+Tapyrus-seeder is a crawler for the Tapyrus network, which exposes a list
 of reliable nodes via a built-in DNS server.
 
 Features:
 * regularly revisits known nodes to check their availability
 * bans nodes after enough failures, or bad behaviour
-* accepts nodes down to v0.3.19 to request new IP addresses from,
-  but only reports good post-v0.3.24 nodes.
+* accepts nodes down to v0.3.0 to request new IP addresses
 * keeps statistics over (exponential) windows of 2 hours, 8 hours,
   1 day and 1 week, to base decisions on.
 * very low memory (a few tens of megabytes) and cpu requirements.
-* crawlers run in parallel (by default 24 threads simultaneously).
+* crawlers can monitor multiple networks and run in parallel (by default 96 threads simultaneously).
 
 REQUIREMENTS
 ------------
@@ -22,18 +21,34 @@ $ sudo apt-get install build-essential libboost-all-dev libssl-dev
 USAGE
 -----
 
-Assuming you want to run a dns seed on dnsseed.example.com, you will
+Assuming you want to run a dns seed on tapyrusseed.example.com, you will
 need an authorative NS record in example.com's domain record, pointing
 to for example vps.example.com:
 
-$ dig -t NS dnsseed.example.com
+$ dig -t NS tapyrusseed.example.com
 
 ;; ANSWER SECTION
-dnsseed.example.com.   86400    IN      NS     vps.example.com.
+tapyrusseed.example.com.   86400    IN      NS     vps.example.com.
 
-On the system vps.example.com, you can now run dnsseed:
+On the system vps.example.com, you can now run tapyrusseed:
 
-./dnsseed -h dnsseed.example.com -n vps.example.com
+./tapyrusseed -i <network_id> -s <network_id>:<initial_seeder> -h tapyrusseed.example.com -n vps.example.com
+
+-i is the network_id
+-s is the name of the initial seeder
+
+When Tapyrus seeder is started for the first time, it queries the initial_seeder to get the addresses of some nodes in each network and builds it own file. After this the seeder can be restarted without initial seeder(-s) argument.
+
+Multiple networks can be supported by using multiple -i
+Multiple initial seeders for each networks can be configured using multiple -s
+
+./tapyrusseed -i <network_id1> -i <network_id2> -i <network_id3> -s <network_id1>:<initial_seeder1>  -s <network_id1>:<initial_seeder2> -s <network_id2>:<initial_seeder> -s <network_id3>:<initial_seeder> -h tapyrusseed.example.com -n vps.example.com
+
+The initial seed node may be another Tapyrus seeder or a Tapyrus core node
+
+./tapyrusseed -i <network_id> -s <network_id>:<tapyrus_seeder_name> -s <network_id>:<ip_address>:<tapyrus_core_port>
+
+When parsing of an initial seeder parameter fails it is ignored and only valid parameters are used.
 
 If you want the DNS server to report SOA records, please provide an
 e-mail address (with the @ part replaced by .) using -m.
@@ -43,9 +58,9 @@ COMPILING
 Compiling will require boost and ssl.  On debian systems, these are provided
 by `libboost-dev` and `libssl-dev` respectively.
 
-$ make
+$ make OPENSSL_PREFIX=/usr/local/opt/openssl
 
-This will produce the `dnsseed` binary.
+This will produce the `tapyrusseed` binary.
 
 
 RUNNING AS NON-ROOT
@@ -58,7 +73,7 @@ a non-privileged port:
 
 $ iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-port 5353
 
-If properly configured, this will allow you to run dnsseed in userspace, using
+If properly configured, this will allow you to run tapyrusseed in userspace, using
 the -p 5353 option.
 
 
