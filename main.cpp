@@ -41,7 +41,7 @@ public:
     const char *ipv6_proxy;
     std::set<uint64_t> filter_whitelist;
     std::vector<std::string> vSeeds;
-    std::set<int> networks;
+    std::set<uint> networks;
 
     CDnsSeedOpts() : nThreads(96), nDnsThreads(4), nPort(53), mbox(NULL), ns(NULL), host(NULL), tor(NULL), fWipeBan(false), fWipeIgnore(false), ipv4_proxy(NULL), ipv6_proxy(NULL) {}
 
@@ -92,7 +92,7 @@ public:
             if (c == -1) break;
             switch (c) {
                 case 'i': {
-                    int n = strtol(optarg, NULL, 10);
+                    uint n = strtoul(optarg, NULL, 10);
                     networks.emplace(n);
                     break;
                 }
@@ -196,7 +196,9 @@ extern "C" void *ThreadCrawler(void *data) {
     ThreadCrawler_options *threadOpts = (ThreadCrawler_options*)data;
     const int nThreads = threadOpts->nThreads;
     const int nNetworkId = threadOpts->nNetworkId;
-    CAddrDb *db = dbs.find(nNetworkId)->second;
+    CAddrDb *db = dbs.begin()->second;
+    if(nNetworkId)
+        db = dbs.find(nNetworkId)->second;
 
     do {
         std::vector<CServiceResult> ips;
@@ -241,13 +243,15 @@ public:
 
     dns_opt_t dns_opt; // must be first
     const int id;
-    const int network;
     std::map<uint64_t, FlagSpecificData> perflag;
     std::atomic<uint64_t> dbQueries;
     std::set<uint64_t> filterWhitelist;
+    std::set<uint> networks;
 
-    void cacheHit(uint64_t requestedFlags, bool force = false) {
-        CAddrDb *db = dbs.find(network)->second;
+    void cacheHit(uint64_t requestedFlags, uint network, bool force = false) {
+        CAddrDb *db = dbs.begin()->second;
+        if(network)
+            db = dbs.find(network)->second;
         static bool nets[NET_MAX] = {};
         if (!nets[NET_IPV4]) {
             nets[NET_IPV4] = true;
@@ -287,7 +291,7 @@ public:
         }
     }
 
-    CDnsThread(CDnsSeedOpts *opts, int idIn, int networkIn) : id(idIn), network(networkIn) {
+    CDnsThread(CDnsSeedOpts *opts, int idIn) : id(idIn) {
         dns_opt.host = opts->host;
         dns_opt.ns = opts->ns;
         dns_opt.mbox = opts->mbox;
@@ -299,6 +303,7 @@ public:
         dbQueries = 0;
         perflag.clear();
         filterWhitelist = opts->filter_whitelist;
+        networks = opts->networks;
     }
 
     void run() {
@@ -309,21 +314,48 @@ public:
 extern "C" int GetIPList(void *data, char *requestedHostname, addr_t *addr, int max, int ipv4, int ipv6) {
     CDnsThread *thread = (CDnsThread *) data;
 
-    uint64_t requestedFlags = 0;
+    char *pEnd = requestedHostname, *pBegin = requestedHostname;
+    uint64_t flags = 0;
+    uint network = 0;
     int hostlen = strlen(requestedHostname);
-    if (hostlen > 1 && requestedHostname[0] == 'x' && requestedHostname[1] != '0') {
-        char *pEnd;
-        uint64_t flags = (uint64_t) strtoull(requestedHostname + 1, &pEnd, 16);
-        if (*pEnd == '.' && pEnd <= requestedHostname + 17 &&
-            std::find(thread->filterWhitelist.begin(), thread->filterWhitelist.end(), flags) !=
-            thread->filterWhitelist.end())
-            requestedFlags = flags;
-        else
-            return 0;
-    } else if (strcasecmp(requestedHostname, thread->dns_opt.host))
+
+    while(pEnd < requestedHostname + hostlen)
+    {
+        switch(*pBegin)
+        {
+            case 'X':
+            case 'x':
+                flags = (uint64_t) strtoull(pBegin + 1, &pEnd, 16);
+                break;
+            case 'I':
+            case 'i':
+                network = (uint) strtoul (pBegin + 1, &pEnd, 10);
+                break;
+            case '.':
+                pBegin = pBegin + 1;
+                break;
+            default:
+                pEnd = requestedHostname + hostlen;
+        }
+        pBegin = pEnd + 1;
+    }
+
+    if (!network && thread->networks.size() > 1)
         return 0;
-    thread->cacheHit(requestedFlags);
-    auto &thisflag = thread->perflag[requestedFlags];
+
+    if (flags && std::find(thread->filterWhitelist.begin(), thread->filterWhitelist.end(), flags) == thread->filterWhitelist.end())
+        return 0;
+
+    if (network && std::find(thread->networks.begin(), thread->networks.end(), network) == thread->networks.end())
+        return 0;
+
+    if (flags != 0 && network == 0 && thread->networks.size() == 1)
+        network = *thread->networks.begin();
+
+    //printf("cachelookup:[%d],[%d]\n", flags, network);
+    thread->cacheHit(flags, network);
+
+    auto &thisflag = thread->perflag[flags];
     unsigned int size = thisflag.cache.size();
     unsigned int maxmax = (ipv4 ? thisflag.nIPv4 : 0) + (ipv6 ? thisflag.nIPv6 : 0);
     if (max > size)
@@ -370,7 +402,7 @@ int StatCompare(const CAddrReport &a, const CAddrReport &b) {
 }
 
 extern "C" void *ThreadDumper(void *arg) {
-    std::set<int> *networks = (std::set<int> *)arg;
+    std::set<uint> *networks = (std::set<uint> *)arg;
 
     do {
         int count = 0;
@@ -380,7 +412,9 @@ extern "C" void *ThreadDumper(void *arg) {
             count++;
         for(auto network:*networks)
         {
-            CAddrDb *db = dbs.find(network)->second;
+            CAddrDb *db = dbs.begin()->second;
+            if(network)
+                db = dbs.find(network)->second;
             char filename[25] = {};
             sprintf(filename, TAPYRUS_DAT_FILE, network);
 
@@ -427,7 +461,7 @@ extern "C" void *ThreadDumper(void *arg) {
 }
 
 extern "C" void *ThreadStats(void *arg) {
-    std::set<int> *networks = (std::set<int> *)arg;
+    std::set<uint> *networks = (std::set<uint> *)arg;
 
     bool first = true;
     do {
@@ -454,7 +488,9 @@ extern "C" void *ThreadStats(void *arg) {
         for(auto network:*networks)
         {
             CAddrDbStats stats;
-            CAddrDb *db = dbs.find(network)->second;
+            CAddrDb *db = dbs.begin()->second;
+            if(network)
+                db = dbs.find(network)->second;
             db->GetStats(stats);
             requests = 0;
             queries = 0;
@@ -476,9 +512,9 @@ extern "C" void *ThreadStats(void *arg) {
         }
         if (first) {
             first = false;
-            printf("\n\n\n\n\n\x1b[3A");
+            printf("\n\n\n\x1b[3A");
         } else
-            printf("\n\n\x1b[2K\x1b[u");
+            printf("\x1b[2K\x1b[u");
         printf("\x1b[s");
         printf("%s", displayStr.str().c_str());
         Sleep(1000);
@@ -499,21 +535,25 @@ extern "C" void *ThreadSeeder(void *args) {
     const int size = options->size;
 
     vector<CNetAddr> ips;
+    int port = TAPYRUS_DEFAULT_PORT;
     do {
         for (auto &seedEnt:*mSeeds)
         {
-            CAddrDb *db = dbs.find(seedEnt.first)->second;
+            CAddrDb *db = dbs.begin()->second;
+            if(seedEnt.first)
+                db = dbs.find(seedEnt.first)->second;
             for (auto& seed : seedEnt.second) {
+                string host(seed);
                 ips.clear();
                 auto pos = seed.find(':');
                 if(pos != std::string::npos)
-                    db->Add(CService(seed), true);
-                else
                 {
-                    LookupHost(seed.c_str(), ips);
-                    for (vector<CNetAddr>::iterator it = ips.begin(); it != ips.end(); it++) {
-                        db->Add(CService(*it, TAPYRUS_DEFAULT_PORT), true);
-                    }
+                    host = seed.substr(0, pos);
+                    port = stod(seed.substr(pos + 1, seed.length() - pos));
+                }
+                LookupHost(host.c_str(), ips);
+                for (vector<CNetAddr>::iterator it = ips.begin(); it != ips.end(); it++) {
+                    db->Add(CService(*it, port), true);
                 }
             }
         }
@@ -596,14 +636,14 @@ int main(int argc, char **argv) {
             if(!numValid)
                 continue;
 
-            if(std::stoi(prefix) == network)
+            if(std::stoul(prefix) == network)
                 seedTmp.push_back(seed.substr(seed.find(":")+1));
         }
         mSeeds.emplace(network, seedTmp);
     }
 
     //find networks for which there is no seeder (-s).
-    std::set<int> missing;
+    std::set<uint> missing;
     for(auto network:opts.networks)
         if(!mSeeds[network].size())
             missing.emplace(network);
@@ -619,7 +659,9 @@ int main(int argc, char **argv) {
         sprintf(filename, TAPYRUS_DAT_FILE, network);
         FILE *f = fopen(filename, "r");
         if (f) {
-            CAddrDb *db = dbs.find(network)->second;
+            CAddrDb *db = dbs.begin()->second;
+            if(network)
+                db = dbs.find(network)->second;
             printf("Loading %s...", filename);
             CAutoFile cf(f);
             cf >> *db;
@@ -648,16 +690,12 @@ int main(int argc, char **argv) {
     printf("done\n");
 
     int i = 0;
-    std::set<int>::iterator iter = opts.networks.begin();
     if (fDNS) {
         printf("Starting %i DNS threads for %s on %s (port %i)...", opts.nDnsThreads, opts.host, opts.ns, opts.nPort);
         dnsThread.clear();
         for (i = 0; i < opts.nDnsThreads; i++) {
-            dnsThread.push_back(new CDnsThread(&opts, i, *iter));
+            dnsThread.push_back(new CDnsThread(&opts, i));
             pthread_create(&threadDns, NULL, ThreadDNS, dnsThread[i]);
-            ++iter;
-            if(iter == opts.networks.end())
-                iter = opts.networks.begin();
             printf(".");
             Sleep(20);
         }
@@ -668,7 +706,7 @@ int main(int argc, char **argv) {
     pthread_attr_t attr_crawler;
     pthread_attr_init(&attr_crawler);
     pthread_attr_setstacksize(&attr_crawler, 0x20000);
-    iter = opts.networks.begin();
+    std::set<uint>::iterator iter = opts.networks.begin();
     for (i = 0; i < opts.nThreads; i++) {
         pthread_t thread;
         ThreadCrawler_options threadOpts;
@@ -683,7 +721,7 @@ int main(int argc, char **argv) {
     printf("done\n");
     pthread_create(&threadStats, NULL, ThreadStats, &opts.networks);
     pthread_create(&threadDump, NULL, ThreadDumper, &opts.networks);
-    printf("Tapyrus Seeder Ready");
+    printf("Tapyrus Seeder Ready\n");
     void *res;
     pthread_join(threadDump, &res);
     return 0;
