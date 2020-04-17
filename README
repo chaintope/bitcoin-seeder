@@ -37,16 +37,12 @@ On the system vps.example.com, you can now run tapyrusseed:
 -i is the network_id
 -s is the name of the initial seeder
 
-When Tapyrus seeder is started for the first time, it queries the initial_seeder to get the addresses of some nodes in each network and builds it own file. After this the seeder can be restarted without initial seeder(-s) argument.
+When Tapyrus seeder is started for the first time, it uses the initial_seeder to get addresses of more nodes in the network and creates it own node list. After this list is built the seeder can be restarted without initial seeder(-s) argument.
 
 Multiple networks can be supported by using multiple -i
 Multiple initial seeders for each networks can be configured using multiple -s
 
-./tapyrusseed -i <network_id1> -i <network_id2> -i <network_id3> -s <network_id1>:<initial_seeder1>  -s <network_id1>:<initial_seeder2> -s <network_id2>:<initial_seeder> -s <network_id3>:<initial_seeder> -h tapyrusseed.example.com -n vps.example.com
-
-The initial seed node may be another Tapyrus seeder or a Tapyrus core node
-
-./tapyrusseed -i <network_id> -s <network_id>:<tapyrus_seeder_name> -s <network_id>:<ip_address>:<tapyrus_core_port>
+./tapyrusseed -i <network_id1> -i <network_id2> -i <network_id3> -s <network_id1>:<ip_address1>:<tapyrus_core_port1>  -s <network_id1>:<ip_address1a>:<tapyrus_core_port1a> -s <network_id2>:<ip_address2>:<tapyrus_core_port2> -s <network_id3>:<ip_address3>:<tapyrus_core_port3> -h tapyrusseed.example.com -n vps.example.com
 
 When parsing of an initial seeder parameter fails it is ignored and only valid parameters are used.
 
